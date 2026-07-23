@@ -1218,26 +1218,36 @@ function initSystem() {
 // ==========================================
 // 3. MÓDULO POS: BUSCADOR Y VENTAS
 // ==========================================
+// ==========================================
+// BÚSQUEDA Y CONTROL DE STOCK CORREGIDOS (POS)
+// ==========================================
+
+// Función auxiliar para calcular el stock real suma de todos los lotes
+function getRealStockForProduct(productId) {
+  const lots = DB.get('f_lots', []);
+  return lots
+    .filter(l => l.prodId === productId)
+    .reduce((sum, l) => sum + (parseInt(l.stockUnits) || 0), 0);
+}
+
 function handleSearch(val) {
   const q = val.toLowerCase().trim();
   const prods = DB.get('f_prods', []);
-  const sugBox = document.getElementById('search-box'); // Corregido: id="search-box"
+  const sugBox = document.getElementById('search-box');
 
   if (!sugBox) return;
 
-  // 1. Si el input está vacío, no mostrar sugerencias
   if (!q) {
     sugBox.style.display = 'none';
     return;
   }
 
-  // 2. Buscar por NOMBRE (desc) O por CÓDIGO DE BARRAS (barcode)
+  // Filtrar por nombre o código de barras
   const filtered = prods.filter(p => 
     (p.desc && p.desc.toLowerCase().includes(q)) || 
     (p.barcode && p.barcode.toLowerCase().includes(q))
   );
 
-  // 3. Renderizar resultados sugeridos
   sugBox.innerHTML = '';
 
   if (filtered.length === 0) {
@@ -1247,19 +1257,51 @@ function handleSearch(val) {
 
   filtered.forEach(p => {
     const item = document.createElement('div');
-    item.className = 'predictive-item'; // Mantiene tus estilos CSS
+    item.className = 'predictive-item';
     
-    // Calcular el precio de venta sugerido
+    // CORRECCIÓN: Calcular el stock real sumando las unidades de los lotes activos (f_lots)
+    const stock = getRealStockForProduct(p.id);
+
     const precio = (p.priceUnit || p.priceBox || 0).toFixed(2);
-    const codeInfo = p.barcode ? ` [Código: ${p.barcode}]` : '';
+    const codeInfo = p.barcode ? ` <small style="color: #888;">(${p.barcode})</small>` : '';
+
+    let stockBadge = '';
+    const isOut = stock <= 0;
+
+    // Mostrar el stock real o la etiqueta de Agotado
+    if (isOut) {
+      stockBadge = `<span style="background: rgba(239, 68, 68, 0.2); color: #ff8080; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; border: 1px solid rgba(239, 68, 68, 0.4);">Agotado (0 uds)</span>`;
+      item.style.opacity = '0.55';
+      item.style.cursor = 'not-allowed';
+    } else {
+      stockBadge = `<span style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; border: 1px solid rgba(16, 185, 129, 0.4);">Stock: ${stock} uds</span>`;
+      item.style.cursor = 'pointer';
+    }
+
+    item.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+        <div>
+          <strong style="color: #fff;">${p.desc}</strong> ${codeInfo}
+          <div style="margin-top: 4px;">${stockBadge}</div>
+        </div>
+        <div style="font-weight: bold; color: var(--p2); font-size: 14px;">
+          S/. ${precio}
+        </div>
+      </div>
+    `;
     
-    item.innerHTML = `<span><strong>${p.desc}</strong>${codeInfo}</span> <span style="float:right;">S/. ${precio}</span>`;
-    
+    // CONDICIÓN Y BLOQUEO DE SELECCIÓN
     item.onclick = () => {
+      if (isOut) {
+        alert('❌ No puedes seleccionar este producto porque se encuentra agotado.');
+        return; 
+      }
+
       selectProductToConfigure(p.id);
       sugBox.style.display = 'none';
       document.getElementById('pos-search').value = '';
     };
+
     sugBox.appendChild(item);
   });
 
@@ -1275,13 +1317,20 @@ function handleSearchKeyPress(event) {
 
     const prods = DB.get('f_prods', []);
 
-    // Busca coincidencia por Código de Barras o por Nombre
     const match = prods.find(p => 
       (p.barcode && p.barcode.toLowerCase() === query) || 
       (p.desc && p.desc.toLowerCase() === query)
     );
 
     if (match) {
+      // CORRECCIÓN: Obtención de stock real
+      const stock = getRealStockForProduct(match.id);
+
+      if (stock <= 0) {
+        alert('❌ El producto está AGOTADO (0 unidades en stock). No se puede agregar a la venta.');
+        return;
+      }
+
       const sugBox = document.getElementById('search-box');
       if (sugBox) sugBox.style.display = 'none';
       
